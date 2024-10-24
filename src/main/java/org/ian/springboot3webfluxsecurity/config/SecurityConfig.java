@@ -30,6 +30,7 @@ public class SecurityConfig {
                 .csrf(ServerHttpSecurity.CsrfSpec::disable)
                 .formLogin(ServerHttpSecurity.FormLoginSpec::disable)
                 .authorizeExchange(authorizeExchange -> authorizeExchange.pathMatchers("/login").permitAll()
+                        .pathMatchers("/admin/**").hasRole("ADMIN")
                         .anyExchange().access(this.tokenAuthorizationManager())
                 )
                 .addFilterAt(authenticationWebFilter(tokenAuthenticationManager()), SecurityWebFiltersOrder.AUTHORIZATION)

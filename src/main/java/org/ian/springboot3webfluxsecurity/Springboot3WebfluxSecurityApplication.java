@@ -18,6 +18,7 @@ public class Springboot3WebfluxSecurityApplication {
         List<String> roles = Arrays.asList("ROLE_ADMIN", "ROLE_USER");
         userService.saveRoles(roles);
         userService.saveUser(new User("admin", "{noop}admin"), roles);
+        userService.saveUser(new User("user", "{noop}user"), List.of("ROLE_USER"));
     }
 
 }
