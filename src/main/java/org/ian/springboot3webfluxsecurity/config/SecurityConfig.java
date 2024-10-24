@@ -1,8 +1,11 @@
 package org.ian.springboot3webfluxsecurity.config;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.ian.springboot3webfluxsecurity.service.*;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity;
 import org.springframework.security.config.web.server.SecurityWebFiltersOrder;
 import org.springframework.security.config.web.server.ServerHttpSecurity;
@@ -16,11 +19,11 @@ import org.springframework.security.web.server.context.ServerSecurityContextRepo
 @EnableWebFluxSecurity
 public class SecurityConfig {
     private final UserService userService;
-    private final JwtService jwtService;
+    private final ReactiveStringRedisTemplate redisTemplate;
 
-    public SecurityConfig(UserService userService, JwtService jwtService) {
+    public SecurityConfig(UserService userService, ReactiveStringRedisTemplate redisTemplate) {
         this.userService = userService;
-        this.jwtService = jwtService;
+        this.redisTemplate = redisTemplate;
     }
 
     @Bean
@@ -31,6 +34,7 @@ public class SecurityConfig {
                 .formLogin(ServerHttpSecurity.FormLoginSpec::disable)
                 .authorizeExchange(authorizeExchange -> authorizeExchange.pathMatchers("/login").permitAll()
                         .pathMatchers("/admin/**").hasRole("ADMIN")
+                        .pathMatchers("/user/**").hasAnyRole("ADMIN", "USER")
                         .anyExchange().access(this.tokenAuthorizationManager())
                 )
                 .addFilterAt(authenticationWebFilter(tokenAuthenticationManager()), SecurityWebFiltersOrder.AUTHORIZATION)
@@ -57,11 +61,16 @@ public class SecurityConfig {
 
     @Bean
     public ServerSecurityContextRepository serverSecurityContextRepository() {
-        return new TokenSecurityContextRepository(tokenAuthenticationManager(), jwtService);
+        return new TokenSecurityContextRepository(tokenAuthenticationManager(), redisTemplate, objectMapper());
     }
 
     @Bean
     public TokenAuthorizationManager tokenAuthorizationManager() {
         return new TokenAuthorizationManager();
+    }
+
+    @Bean
+    public ObjectMapper objectMapper() {
+        return new ObjectMapper().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
     }
 }

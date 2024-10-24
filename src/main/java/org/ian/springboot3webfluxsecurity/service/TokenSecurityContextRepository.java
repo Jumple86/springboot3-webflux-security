@@ -1,11 +1,12 @@
 package org.ian.springboot3webfluxsecurity.service;
 
-import io.jsonwebtoken.*;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import org.springframework.http.HttpHeaders;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextImpl;
@@ -13,18 +14,20 @@ import org.springframework.security.web.server.context.ServerSecurityContextRepo
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
-import java.util.List;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 public class TokenSecurityContextRepository implements ServerSecurityContextRepository {
     private final TokenAuthenticationManager tokenAuthenticationManager;
-    private final JwtService jwtService;
+    private final ReactiveStringRedisTemplate redisTemplate;
+    private final ObjectMapper objectMapper;
 
-    private final static String PAYLOAD_ROLES = "roles";
-
-    public TokenSecurityContextRepository(TokenAuthenticationManager tokenAuthenticationManager, JwtService jwtService) {
+    public TokenSecurityContextRepository(TokenAuthenticationManager tokenAuthenticationManager, ReactiveStringRedisTemplate redisTemplate, ObjectMapper objectMapper) {
         this.tokenAuthenticationManager = tokenAuthenticationManager;
-        this.jwtService = jwtService;
+        this.redisTemplate = redisTemplate;
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -36,29 +39,30 @@ public class TokenSecurityContextRepository implements ServerSecurityContextRepo
     public Mono<SecurityContext> load(ServerWebExchange exchange) {
         return Mono.justOrEmpty(exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION))
                 .filter(s -> s.length() > 7 && s.startsWith("Bearer "))
-                .map(s -> this.decode(s.substring(7)))
+                .flatMap(s -> this.decode(s.substring(7)))
                 .onErrorResume(Mono::error)
                 .flatMap(auth -> tokenAuthenticationManager.authenticate(auth))
                 .switchIfEmpty(Mono.error(new BadCredentialsException("Invalid Credentials")))
                 .map(SecurityContextImpl::new);
     }
 
-    public Authentication decode(String token) {
-        Claims claims;
+    public Mono<Authentication> decode(String token) {
+        return redisTemplate.opsForHash().entries(token)
+                .collectMap(entry -> (String) entry.getKey(), Map.Entry::getValue)
+                .map(userMap -> {
+                    Set<String> roles = this.convertToRoleSet((String) userMap.get("roles"));
+                    Set<SimpleGrantedAuthority> authorities = roles.stream()
+                            .map(SimpleGrantedAuthority::new).collect(Collectors.toSet());
+                    return new UsernamePasswordAuthenticationToken(userMap.get("username"), token, authorities);
+                });
+    }
+
+    private Set<String> convertToRoleSet(String roleString) {
         try {
-            claims = jwtService.extractAllClaims(token);
-        } catch (ExpiredJwtException e) {
-            throw new BadCredentialsException("Expired token");
-        } catch (UnsupportedJwtException e) {
-            throw new BadCredentialsException("Unsupported token");
-        } catch (MalformedJwtException e) {
-            throw new BadCredentialsException("Malformed token");
-        } catch (SignatureException | IllegalArgumentException e) {
-            throw new BadCredentialsException("Invalid token");
+        Set roles = objectMapper.readValue(roleString, HashSet.class);
+        return roles;
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
         }
-        List<String> roles = (List<String>)claims.get(PAYLOAD_ROLES, List.class);
-        List<GrantedAuthority> authorities = roles.stream()
-                .map(SimpleGrantedAuthority::new).collect(Collectors.toList());
-        return new UsernamePasswordAuthenticationToken(claims.getSubject(), token, authorities);
     }
 }

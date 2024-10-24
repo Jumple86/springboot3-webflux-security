@@ -29,6 +29,6 @@ public class TokenAuthenticationManager implements ReactiveAuthenticationManager
                 .filter(u -> passwordEncoder.matches(authentication.getCredentials().toString(), u.getPassword()))
                 .switchIfEmpty(Mono.error(new BadCredentialsException("Invalid username or password")))
                 .cast(User.class)
-                .map(u -> new UsernamePasswordAuthenticationToken(u.getUsername(), null, u.getAuthorities()));
+                .map(u -> new UsernamePasswordAuthenticationToken(u.getUsername(), u, u.getAuthorities()));
     }
 }
